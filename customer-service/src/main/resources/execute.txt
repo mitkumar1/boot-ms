@@ -1,0 +1,122 @@
+
+h2-console
+http://localhost:4040/h2-console
+no pwd needed
+connect
+
+sql - SELECT * FROM CUSTOMER;
+
+-----------------CUSTOMER--------------------
+GET
+http://localhost:4040/api/test
+
+GET
+http://localhost:4040/api/v1/customers
+
+
+Header Parameter -
+Content-Type:'application/json'
+raw, JSON from the drop down
+[
+    {
+        "customerId": 201,
+        "customerName": "Rachel",
+        "email": "rachel@abc.com",
+        "mobileNumber": 81111111
+    },
+    {
+        "customerId": 202,
+        "customerName": "Tressa",
+        "email": "tressa@abc.com",
+        "mobileNumber": 82222222
+    },
+    {
+        "customerId": 203,
+        "customerName": "Kevin",
+        "email": "kevin@abc.com",
+        "mobileNumber": 83333333
+    },
+    {
+        "customerId": 204,
+        "customerName": "Smith",
+        "email": "smith@abc.com",
+        "mobileNumber": 84444444
+    },
+    {
+        "customerId": 205,
+        "customerName": "Tony",
+        "email": "tony@abc.com",
+        "mobileNumber": 84555555
+    }
+]
+
+GET
+http://localhost:4040/api/v1/customers/205
+
+o/p => json
+
+
+PUT
+http://localhost:4040/api/v1/customers/204
+Content-Type:'application/json'
+raw, JSON from the drop down
+
+    {
+        "customerId": 204,
+        "customerName": "Kevin P",
+        "email": "kevinp@abc.com",
+        "mobileNumber": 83333333
+    }
+
+
+http://localhost:4040/api/v1/customers/205
+DELETE
+o/p => 205
+
+
+http://localhost:4040/api/v1/customers
+POST
+    {
+        "customerId": 208,
+        "customerName": "Michel",
+        "email": "michel@abc.com",
+        "mobileNumber": 188888888
+    }
+
+o/p =>
+{
+    "customerId": 208,
+    "customerName": "Michel",
+    "email": "michel@abc.com",
+    "mobileNumber": 188888888
+}
+
+http://localhost:4040/api/v1/customers/208
+PATCH
+    {
+         "email": "michel_upd@abc.com"
+    }
+
+o/p =>
+{
+    "customerId": 208,
+    "customerName": "Michel",
+    "email": "michel_upd@abc.com",
+    "mobileNumber": 188888888
+}
+
+http://localhost:4040/api/v1/customers/208
+PATCH
+
+    {
+         	"email": "michel@abc.com",
+      		"mobileNumber": 19999999
+    }
+
+o/p =>
+{
+    "customerId": 208,
+    "customerName": "Michel",
+    "email": "michel@abc.com",
+    "mobileNumber": 19999999
+}
