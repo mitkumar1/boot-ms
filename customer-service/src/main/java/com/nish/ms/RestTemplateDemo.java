@@ -1,7 +1,6 @@
 package com.nish.ms;
 
 import com.nish.ms.model.Customer;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +12,7 @@ import java.util.Map;
 
 
 /*
-*
+* https://www.baeldung.com/rest-template
 * https://howtodoinjava.com/spring-boot2/resttemplate/spring-restful-client-resttemplate-example/
 * */
 public class RestTemplateDemo {
@@ -37,6 +36,10 @@ public class RestTemplateDemo {
 
     }
 
+    /*
+     * getForEntity() - Get Plain JSON
+     *
+     * */
     private void restTemplateGETmthd(RestTemplate restTemplate) {
 
         // "/api/v1/customers"
@@ -53,6 +56,10 @@ public class RestTemplateDemo {
 
     }
 
+    /*
+    * getForObject() - Retrieving POJO Instead of JSON
+    *
+    * */
     private void restTemplateGETmthd1(RestTemplate restTemplate) {
 
         // "/api/v1/customers"

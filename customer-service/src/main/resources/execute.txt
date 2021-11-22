@@ -120,3 +120,11 @@ o/p =>
     "email": "michel@abc.com",
     "mobileNumber": 19999999
 }
+
+====================================================
+
+-------free api(no security) to consume-------------
+https://mixedanalytics.com/blog/list-actually-free-open-no-auth-needed-apis/
+
+https://api.nationalize.io/?name=andrew
+https://api.agify.io/?name=kevin
