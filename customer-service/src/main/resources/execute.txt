@@ -6,6 +6,7 @@ connect
 
 sql - SELECT * FROM CUSTOMER;
 
+local host : SYNBLRLTC0ZD303.synechron.com
 -----------------CUSTOMER--------------------
 GET
 http://localhost:4040/api/test
