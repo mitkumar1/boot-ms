@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: menu-service
+
+server:
+  port: 4060
+
+info:
+  build:
+    artificatId: '@project.artifactId@'
+    groupId: '@project.groupId@'
+  java:
+    version: @java.version@
+  auther:
+    name: nishchay
+
+
+# enable/disable Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+        - "*"
+
+  endpoint:
+    health:
+      show-details: always
+
+
+  #Endpoint is used to shut down the Spring Boot application
+  shutdown:
+      enabled: true
