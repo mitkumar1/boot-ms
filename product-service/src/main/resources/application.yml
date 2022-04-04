@@ -1,0 +1,23 @@
+server:
+  port: 4050
+
+spring:
+  application:
+    name: product-service
+
+
+  # database config
+  datasource:
+    url: jdbc:h2:mem:product_data
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+
+  #  enabling the H2 console
+  h2:
+    console:
+      enabled: true
+

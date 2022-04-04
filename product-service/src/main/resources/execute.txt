@@ -1,0 +1,30 @@
+h2-console
+http://localhost:4050/h2-console
+url: jdbc:h2:mem:product_data
+no pwd needed
+connect
+
+sql - SELECT * FROM CUSTOMER;
+
+-----------------CUSTOMER--------------------
+
+GET http://localhost:4050/api/v1/product
+GET http://localhost:4050/api/v1/product/3
+
+PUT http://localhost:4050/api/v1/product/3
+Body > Raw > JSON
+    {
+    "categories": "COMPUTER_ACCESSORIES",
+    "brandName": "HCL",
+    "description": "HCL Kyboard"
+    }
+
+POST http://localhost:4050/api/v1/product/3
+Body > Raw > JSON
+    {
+        "categories": "TV",
+        "brandName": "One Plus",
+        "description": "One Plus X55"
+    }
+
+DELETE http://localhost:4050/api/v1/product/4
