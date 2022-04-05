@@ -1,0 +1,66 @@
+
+
+local host : SYNBLRLTC0ZD303.synechron.com
+-----------------CLIENT--------------------
+GET
+http://localhost:4070/client/srch/customers
+o/p->obj format
+
+GET
+http://localhost:4070/client/srch/customers/{id}
+id -201-205
+o/p->obj format
+
+
+
+GET
+http://localhost:4070/client/srch/customers/205
+
+o/p => json
+
+
+
+GET
+http://localhost:4070/client/customers
+o/p => string
+
+
+GET
+http://localhost:4070/client/customers/205
+o/p => string
+
+
+PUT
+http://localhost:4070/api/v1/customers/204
+Content-Type:'application/json'
+raw, JSON from the drop down
+
+    {
+        "customerId": 204,
+        "customerName": "Kevin P",
+        "email": "kevinp@abc.com",
+        "mobileNumber": 83333333
+    }
+
+
+
+http://localhost:4070/client/customers
+POST
+    {
+        "customerId": 208,
+        "customerName": "Michel",
+        "email": "michel@abc.com",
+        "mobileNumber": 188888888
+    }
+
+o/p =>
+{
+    "customerId": 208,
+    "customerName": "Michel",
+    "email": "michel@abc.com",
+    "mobileNumber": 188888888
+}
+
+http://localhost:4070/client/customers/208
+DELETE
+o/p => 208
