@@ -23,10 +23,6 @@ public class ConfigController {
 
     private final CustomerServiceConfig config;
 
-    public ConfigController(CustomerServiceConfig config) {
-        this.config = config;
-    }
-
     /**
      * Get current configuration (refreshable from Spring Cloud Config)
      */
