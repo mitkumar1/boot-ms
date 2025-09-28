@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-service-jenkins-svc
+  namespace: customer-service-prod
+  labels:
+    app: customer-service
+    tier: backend
+    deployed-by: jenkins
+spec:
+  selector:
+    app: customer-service
+  ports:
+  - name: http
+    port: 80
+    targetPort: 4040
+    protocol: TCP
+  - name: jmx
+    port: 9999
+    targetPort: 9999
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-service-jenkins-lb
+  namespace: customer-service-prod
+  labels:
+    app: customer-service
+    tier: backend
+    deployed-by: jenkins
+spec:
+  selector:
+    app: customer-service
+  ports:
+  - name: http
+    port: 80
+    targetPort: 4040
+    protocol: TCP
+  type: LoadBalancer

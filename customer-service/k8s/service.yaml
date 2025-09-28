@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-service
+  namespace: default
+  labels:
+    app: customer-service
+    version: v1
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb  # For AWS
+    service.beta.kubernetes.io/azure-load-balancer-resource-group: myResourceGroup  # For Azure
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: actuator
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: customer-service
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-service-headless
+  namespace: default
+  labels:
+    app: customer-service
+    version: v1
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for service discovery
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: customer-service
+
+---
+# Service Monitor for Prometheus (if using Prometheus Operator)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: customer-service-monitor
+  namespace: default
+  labels:
+    app: customer-service
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: customer-service
+  endpoints:
+  - port: actuator
+    path: /actuator/prometheus
+    interval: 30s
+    scrapeTimeout: 10s

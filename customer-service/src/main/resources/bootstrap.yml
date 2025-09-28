@@ -1,0 +1,44 @@
+# Bootstrap configuration for Spring Cloud Config
+spring:
+  application:
+    name: customer-service
+  
+  cloud:
+    config:
+      uri: http://localhost:8888  # Config server URL
+      fail-fast: false           # Don't fail if config server is not available
+      retry:
+        initial-interval: 1000
+        max-attempts: 3
+        max-interval: 2000
+        multiplier: 1.1
+
+# Profile-specific config server settings
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  cloud:
+    config:
+      uri: http://localhost:8888
+      profile: dev
+      
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  cloud:
+    config:
+      uri: ${CONFIG_SERVER_URL:http://config-server:8888}
+      profile: prod
+      
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  cloud:
+    config:
+      enabled: false  # Disable config server for local development

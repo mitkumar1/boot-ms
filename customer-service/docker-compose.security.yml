@@ -1,0 +1,218 @@
+# Docker Configuration for Security Scanning
+# This file contains Docker configurations optimized for security scanning tools
+
+version: '3.8'
+
+services:
+  # Main application service with security scanning capabilities
+  customer-service-security:
+    build:
+      context: .
+      dockerfile: Dockerfile.security
+      args:
+        - JAVA_VERSION=21
+        - SPRING_PROFILE=security-scan
+    container_name: customer-service-security
+    ports:
+      - "8080:8080"
+      - "8081:8081"  # Management/actuator port
+    environment:
+      # Java 21 Virtual Thread configuration
+      - JAVA_OPTS=-server -Xms512m -Xmx2g -XX:+UseZGC -XX:+UnlockExperimentalVMOptions --enable-preview
+      - VIRTUAL_THREAD_OPTS=--enable-preview -Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=256
+      
+      # Security scanning environment
+      - SPRING_PROFILES_ACTIVE=security-scan
+      - FORTIFY_SCAN_ENABLED=true
+      - BLACKDUCK_SCAN_ENABLED=true
+      - OWASP_SCAN_ENABLED=true
+      
+      # Application configuration
+      - SERVER_PORT=8080
+      - MANAGEMENT_SERVER_PORT=8081
+      - LOGGING_LEVEL_ROOT=INFO
+      - LOGGING_LEVEL_COM_CUSTOMER=DEBUG
+      
+    volumes:
+      # Mount security scanning tools and results
+      - ./fortify-results:/app/fortify-results
+      - ./blackduck-output:/app/blackduck-output
+      - ./security-reports:/app/security-reports
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      
+    networks:
+      - security-scan-network
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Fortify Static Code Analyzer service
+  fortify-sca:
+    image: fortify/sca:latest
+    container_name: fortify-sca
+    volumes:
+      - ./src:/workspace/src:ro
+      - ./pom.xml:/workspace/pom.xml:ro
+      - ./fortify-rules.xml:/workspace/fortify-rules.xml:ro
+      - ./fortify-filter.txt:/workspace/fortify-filter.txt:ro
+      - ./fortify-results:/workspace/results
+    working_dir: /workspace
+    environment:
+      - FORTIFY_BUILD_ID=${BUILD_ID:-local}
+      - FORTIFY_PROJECT_NAME=customer-service-virtual-threads
+      - FORTIFY_SOURCE_VERSION=21
+      - FORTIFY_SCAN_TIMEOUT=1800
+    networks:
+      - security-scan-network
+    command: >
+      sh -c "
+        echo 'Starting Fortify SAST scan...' &&
+        sourceanalyzer -b $${FORTIFY_BUILD_ID} -clean &&
+        sourceanalyzer -b $${FORTIFY_BUILD_ID} -source 21 src/main/java &&
+        sourceanalyzer -b $${FORTIFY_BUILD_ID} -scan -f results/fortify-results.fpr -rules fortify-rules.xml -filter-file fortify-filter.txt &&
+        echo 'Fortify scan completed successfully'
+      "
+
+  # Black Duck Detect service
+  blackduck-detect:
+    image: blackducksoftware/detect:latest
+    container_name: blackduck-detect
+    volumes:
+      - .:/workspace:ro
+      - ./blackduck-output:/workspace/blackduck-output
+      - ~/.m2:/root/.m2:ro
+    working_dir: /workspace
+    environment:
+      - BLACKDUCK_URL=${BLACKDUCK_URL}
+      - BLACKDUCK_API_TOKEN=${BLACKDUCK_API_TOKEN}
+      - DETECT_PROJECT_NAME=customer-service-virtual-threads
+      - DETECT_PROJECT_VERSION_NAME=${BUILD_NUMBER:-1.0.0}
+      - DETECT_SOURCE_PATH=/workspace
+      - DETECT_MAVEN_BUILD_COMMAND=compile
+      - DETECT_OUTPUT_PATH=/workspace/blackduck-output
+      - DETECT_CLEANUP=false
+      - DETECT_RISK_REPORT_PDF=true
+      - DETECT_NOTICES_REPORT=true
+      - DETECT_TIMEOUT=900
+    networks:
+      - security-scan-network
+    depends_on:
+      - customer-service-security
+
+  # OWASP Dependency Check service
+  owasp-dependency-check:
+    image: owasp/dependency-check:latest
+    container_name: owasp-dependency-check
+    volumes:
+      - .:/workspace:ro
+      - ./owasp-reports:/workspace/reports
+      - ~/.m2:/root/.m2:ro
+      - ./dependency-check-suppressions.xml:/workspace/dependency-check-suppressions.xml:ro
+    working_dir: /workspace
+    environment:
+      - JAVA_OPTS=-Xmx2g
+    networks:
+      - security-scan-network
+    command: >
+      --scan /workspace
+      --format HTML
+      --format XML
+      --format JSON
+      --out /workspace/reports
+      --suppression /workspace/dependency-check-suppressions.xml
+      --enableRetired
+      --enableExperimental
+      --failOnCVSS 8
+
+  # Security report aggregator service
+  security-aggregator:
+    build:
+      context: .
+      dockerfile: Dockerfile.security-aggregator
+    container_name: security-aggregator
+    volumes:
+      - ./fortify-results:/app/fortify-results:ro
+      - ./blackduck-output:/app/blackduck-output:ro
+      - ./owasp-reports:/app/owasp-reports:ro
+      - ./security-reports:/app/security-reports
+    environment:
+      - BUILD_NUMBER=${BUILD_NUMBER:-local}
+      - PROJECT_NAME=customer-service-virtual-threads
+      - SCAN_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    networks:
+      - security-scan-network
+    depends_on:
+      - fortify-sca
+      - blackduck-detect
+      - owasp-dependency-check
+    command: >
+      sh -c "
+        echo 'Aggregating security scan results...' &&
+        python3 /app/security-aggregator.py &&
+        echo 'Security report aggregation completed'
+      "
+
+  # Vulnerability database updater
+  vuln-db-updater:
+    image: owasp/dependency-check:latest
+    container_name: vuln-db-updater
+    volumes:
+      - ./vulnerability-db:/usr/share/dependency-check/data
+    environment:
+      - JAVA_OPTS=-Xmx1g
+    networks:
+      - security-scan-network
+    command: --updateonly --data /usr/share/dependency-check/data
+
+networks:
+  security-scan-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  fortify-results:
+    driver: local
+  blackduck-output:
+    driver: local
+  owasp-reports:
+    driver: local
+  security-reports:
+    driver: local
+  vulnerability-db:
+    driver: local
+
+# Security scanning profiles for different environments
+profiles:
+  # Development profile - basic scanning
+  development:
+    services:
+      customer-service-security:
+        environment:
+          - FORTIFY_SCAN_ENABLED=false
+          - BLACKDUCK_SCAN_ENABLED=false
+          - OWASP_SCAN_ENABLED=true
+  
+  # Staging profile - full scanning
+  staging:
+    services:
+      customer-service-security:
+        environment:
+          - FORTIFY_SCAN_ENABLED=true
+          - BLACKDUCK_SCAN_ENABLED=true
+          - OWASP_SCAN_ENABLED=true
+  
+  # Production profile - comprehensive scanning
+  production:
+    services:
+      customer-service-security:
+        environment:
+          - FORTIFY_SCAN_ENABLED=true
+          - BLACKDUCK_SCAN_ENABLED=true
+          - OWASP_SCAN_ENABLED=true
+          - CHECKMARX_SCAN_ENABLED=true

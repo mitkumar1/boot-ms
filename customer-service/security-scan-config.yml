@@ -1,0 +1,195 @@
+# Security Scanning Configuration for Customer Service
+# This file contains configuration for all security scanning tools
+
+## Fortify Configuration
+fortify:
+  project_name: "customer-service-virtual-threads"
+  version: "${BUILD_NUMBER}"
+  build_id: "${BUILD_ID}"
+  rules_file: "fortify-rules.xml"
+  filter_file: "fortify-filter.txt"
+  source_version: "21"
+  scan_timeout: 1800
+  critical_threshold: 0
+  high_threshold: 5
+  medium_threshold: 20
+  
+  # Fortify Exclusions
+  exclusions:
+    - "**/test/**"
+    - "**/target/**"
+    - "**/*Test.java"
+    - "**/*Tests.java"
+    - "**/Application.java"
+  
+  # Custom Categories
+  categories:
+    critical:
+      - "SQL Injection"
+      - "Command Injection"
+      - "Path Manipulation"
+      - "XML External Entity"
+    high:
+      - "Cross-Site Scripting"
+      - "LDAP Injection"
+      - "Authentication"
+      - "Authorization"
+      - "Cryptographic Issues"
+    medium:
+      - "Input Validation"
+      - "System Information Leak"
+      - "Privacy Violation"
+
+## Black Duck Configuration
+blackduck:
+  project_name: "customer-service-virtual-threads"
+  version: "${BUILD_NUMBER}"
+  code_location_name: "customer-service-${BUILD_NUMBER}"
+  scan_timeout: 900
+  api_timeout: 300
+  memory: 4096
+  parallel_processors: 4
+  
+  # Policy Configuration
+  policy:
+    fail_on_policy_violation: true
+    fail_on_severities: ["CRITICAL", "HIGH"]
+    check_policies: true
+    
+  # Component Exclusions
+  exclusions:
+    scopes:
+      - "test"
+      - "provided"
+    patterns:
+      - "**/test/**"
+      - "**/target/**"
+      - "**/*.log"
+      - "**/*.tmp"
+      - "**/node_modules/**"
+      - "**/.git/**"
+  
+  # Risk Thresholds
+  risk_thresholds:
+    critical: 0
+    high: 3
+    medium: 10
+    low: 50
+
+## OWASP Dependency Check Configuration
+owasp:
+  cvss_threshold: 8.0
+  fail_build_on_cvss: 8
+  data_directory: "~/.dependency-check-data"
+  suppression_file: "dependency-check-suppressions.xml"
+  
+  # CVE Data Sources
+  data_sources:
+    nvd: true
+    retired_js: true
+    ossindex: true
+    npm_audit: true
+    
+  # Analyzers
+  analyzers:
+    jar: true
+    javascript: true
+    node: true
+    assembly: false
+    cmake: false
+    golang: false
+    php: false
+    python: false
+    ruby: false
+    swift: false
+
+## Checkmarx Configuration (Optional)
+checkmarx:
+  server_url: "https://your-checkmarx-server.com"
+  project_name: "customer-service-virtual-threads"
+  team_name: "\\CxServer\\SP\\Checkmarx\\Java"
+  preset_name: "Checkmarx Default"
+  scan_timeout: 3600
+  
+  # Thresholds
+  thresholds:
+    high: 10
+    medium: 50
+    low: 100
+    
+  # Exclusions
+  exclusions:
+    folders:
+      - "test"
+      - "target"
+      - ".git"
+      - "node_modules"
+    files:
+      - "*.log"
+      - "*.tmp"
+      - "*.jar"
+
+## Security Scanning Matrix
+# This matrix defines which scans run for different scenarios
+
+scan_matrix:
+  pull_request:
+    - owasp
+    - sonarqube
+  main_branch:
+    - owasp
+    - fortify
+    - blackduck
+    - sonarqube
+  release:
+    - owasp
+    - fortify
+    - blackduck
+    - sonarqube
+    - checkmarx
+    
+## Notification Configuration
+notifications:
+  security_team:
+    email: "security-team@company.com"
+    slack_channel: "#security-alerts"
+    
+  development_team:
+    email: "dev-team@company.com"
+    slack_channel: "#customer-service-dev"
+    
+  triggers:
+    critical_vulnerability: ["security_team", "development_team"]
+    policy_violation: ["security_team"]
+    scan_failure: ["development_team"]
+    
+## Reporting Configuration
+reports:
+  formats: ["html", "xml", "json", "pdf"]
+  retention_days: 90
+  archive_artifacts: true
+  
+  # Report Distribution
+  distribution:
+    security_dashboard: true
+    jenkins_artifacts: true
+    email_reports: true
+    slack_summary: true
+
+## Environment Specific Settings
+environments:
+  development:
+    fortify_enabled: false
+    blackduck_enabled: false
+    owasp_enabled: true
+    
+  staging:
+    fortify_enabled: true
+    blackduck_enabled: true
+    owasp_enabled: true
+    
+  production:
+    fortify_enabled: true
+    blackduck_enabled: true
+    owasp_enabled: true
+    checkmarx_enabled: true

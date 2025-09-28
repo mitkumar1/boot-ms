@@ -1,0 +1,67 @@
+# Fortify Filter File
+# This file contains filters to reduce false positives and focus on critical security issues
+
+# Filter out false positives for Spring Boot Virtual Thread implementation
+-category:"System Information Leak" -file:"**/VirtualThreadConfig.java"
+-category:"System Information Leak" -file:"**/ScheduledTaskService.java"
+
+# Filter out test-related false positives
+-category:"Privacy Violation" -file:"**/test/**"
+-category:"Weak Cryptographic Hash" -file:"**/test/**"
+
+# Filter out Spring Boot auto-configuration false positives
+-category:"Missing Check against Null" -file:"**/Application.java"
+-category:"System Information Leak" -file:"**/Application.java"
+
+# Filter out Lombok-generated code issues
+-category:"Missing Check against Null" -file:"**/*Builder.java"
+-category:"Unreleased Resource" -file:"**/*Builder.java"
+
+# Filter out JPA/Hibernate false positives
+-category:"SQL Injection" -file:"**/*Repository.java" -function:"findBy*"
+-category:"SQL Injection" -file:"**/*Repository.java" -function:"save*"
+
+# Filter out Spring Security configuration false positives
+-category:"Weak Cryptographic Hash" -file:"**/SecurityConfig.java" -function:"passwordEncoder"
+
+# Filter out actuator endpoint false positives
+-category:"System Information Leak" -file:"**/HealthController.java"
+-category:"System Information Leak" -file:"**/MetricsController.java"
+
+# Filter out virtual thread executor false positives
+-category:"Thread Safety" -file:"**/VirtualThreadConfig.java" -function:"virtualThreadExecutor"
+-category:"Unreleased Resource" -file:"**/VirtualThreadConfig.java"
+
+# Filter out scheduled task false positives
+-category:"System Information Leak" -file:"**/ScheduledTaskService.java" -function:"performHealthCheck"
+-category:"System Information Leak" -file:"**/ScheduledTaskService.java" -function:"collectMetrics"
+
+# Filter out Spring Boot DevTools false positives (development only)
+-category:"System Information Leak" -file:"**/DevToolsConfig.java"
+
+# Filter out common Spring annotations false positives
+-category:"Missing Check against Null" -annotation:"@Autowired"
+-category:"Missing Check against Null" -annotation:"@Value"
+
+# Filter out configuration properties false positives
+-category:"Hard-Coded Password" -file:"**/application.yml"
+-category:"Hard-Coded Password" -file:"**/application.properties"
+
+# Filter out Docker and deployment script false positives
+-category:"Command Injection" -file:"Dockerfile"
+-category:"Path Manipulation" -file:"deploy.sh"
+-category:"Path Manipulation" -file:"jenkins-deploy.sh"
+
+# Filter out Maven POM false positives
+-category:"XML External Entity" -file:"pom.xml"
+
+# Filter out common logging false positives
+-category:"System Information Leak" -function:"log.*" -parameter:".*customer.*"
+-category:"System Information Leak" -function:"logger.*" -parameter:".*id.*"
+
+# Filter out Spring Boot starter dependencies false positives
+-category:"Insecure Randomness" -file:"**/*Config.java" -function:"random*"
+
+# Filter out false positives for REST controller validation
+-category:"Missing Check against Null" -annotation:"@Valid"
+-category:"Missing Check against Null" -annotation:"@NotNull"

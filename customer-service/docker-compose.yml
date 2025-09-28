@@ -1,0 +1,87 @@
+services:
+  customer-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: customer-service:latest
+    container_name: customer-service-app
+    ports:
+      - "4041:4040"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseZGC -XX:+UnlockExperimentalVMOptions --enable-preview
+      - VIRTUAL_THREAD_OPTS=-Djdk.virtualThreadScheduler.parallelism=10 -Djdk.virtualThreadScheduler.maxPoolSize=256
+      - SPRING_TASK_EXECUTION_POOL_CORE_SIZE=10
+      - SPRING_TASK_EXECUTION_POOL_MAX_SIZE=50
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4040/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.customer-service.rule=Host(`customer-service.local`)"
+      - "traefik.http.services.customer-service.loadbalancer.server.port=4040"
+    networks:
+      - customer-network
+
+  # Optional: Spring Cloud Config Server for external configuration
+  config-server:
+    image: hyness/spring-cloud-config-server:latest
+    container_name: config-server
+    ports:
+      - "8888:8888"
+    environment:
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_URI=https://github.com/your-org/config-repo
+      - SPRING_CLOUD_CONFIG_SERVER_GIT_DEFAULT_LABEL=main
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - customer-network
+
+  # Optional: Monitoring with Prometheus and Grafana
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"  
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - customer-network
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - customer-network
+    profiles:
+      - monitoring
+
+networks:
+  customer-network:
+    driver: bridge
+
+volumes:
+  grafana-data:
+    driver: local

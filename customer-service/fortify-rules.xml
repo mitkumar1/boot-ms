@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RuleSet xmlns="http://www.fortify.com/schema/ruleset">
+    <RuleSetVersion>1.0</RuleSetVersion>
+    <Name>Customer Service Virtual Thread Security Rules</Name>
+    <Description>Fortify SAST security rules for Spring Boot Customer Service with Virtual Threads</Description>
+    
+    <!-- Custom rules for Virtual Thread security -->
+    <Rules>
+        <!-- Thread Safety Rules -->
+        <Rule id="VIRTUAL_THREAD_SAFETY">
+            <Name>Virtual Thread Safety</Name>
+            <Description>Check for thread safety issues in virtual thread context</Description>
+            <Category>Concurrency</Category>
+            <Priority>High</Priority>
+            <Pattern>
+                <![CDATA[
+                // Check for synchronized blocks in virtual thread context
+                synchronized\s*\([^)]*\)\s*\{
+                ]]>
+            </Pattern>
+        </Rule>
+        
+        <!-- Spring Security Rules -->
+        <Rule id="SPRING_SECURITY_CONFIG">
+            <Name>Spring Security Configuration</Name>
+            <Description>Validate Spring Security configuration</Description>
+            <Category>Authentication</Category>
+            <Priority>High</Priority>
+        </Rule>
+        
+        <!-- Input Validation Rules -->
+        <Rule id="INPUT_VALIDATION">
+            <Name>Input Validation</Name>
+            <Description>Check for proper input validation in REST endpoints</Description>
+            <Category>Input Validation</Category>
+            <Priority>Medium</Priority>
+        </Rule>
+        
+        <!-- SQL Injection Prevention -->
+        <Rule id="SQL_INJECTION">
+            <Name>SQL Injection Prevention</Name>
+            <Description>Check for SQL injection vulnerabilities</Description>
+            <Category>SQL Injection</Category>
+            <Priority>Critical</Priority>
+        </Rule>
+        
+        <!-- Cross-Site Scripting (XSS) -->
+        <Rule id="XSS_PREVENTION">
+            <Name>XSS Prevention</Name>
+            <Description>Check for XSS vulnerabilities</Description>
+            <Category>Cross-Site Scripting</Category>
+            <Priority>High</Priority>
+        </Rule>
+        
+        <!-- Sensitive Data Exposure -->
+        <Rule id="SENSITIVE_DATA">
+            <Name>Sensitive Data Exposure</Name>
+            <Description>Check for sensitive data exposure in logs and responses</Description>
+            <Category>Privacy Violation</Category>
+            <Priority>High</Priority>
+        </Rule>
+        
+        <!-- Cryptographic Issues -->
+        <Rule id="CRYPTO_ISSUES">
+            <Name>Cryptographic Issues</Name>
+            <Description>Check for weak cryptographic implementations</Description>
+            <Category>Cryptographic Issues</Category>
+            <Priority>High</Priority>
+        </Rule>
+        
+        <!-- Configuration Security -->
+        <Rule id="CONFIG_SECURITY">
+            <Name>Configuration Security</Name>
+            <Description>Check for insecure configuration settings</Description>
+            <Category>System Information Leak</Category>
+            <Priority>Medium</Priority>
+        </Rule>
+    </Rules>
+    
+    <!-- Rule Filters -->
+    <Filters>
+        <!-- Exclude test files from certain checks -->
+        <Filter>
+            <Name>Test File Filter</Name>
+            <Include>
+                <Pattern>**/test/**/*.java</Pattern>
+            </Include>
+            <ExcludeRules>
+                <Rule>SENSITIVE_DATA</Rule>
+            </ExcludeRules>
+        </Filter>
+        
+        <!-- Spring Boot specific filters -->
+        <Filter>
+            <Name>Spring Boot Filter</Name>
+            <Include>
+                <Pattern>**/Application.java</Pattern>
+                <Pattern>**/config/*.java</Pattern>
+            </Include>
+            <ExcludeRules>
+                <Rule>CONFIG_SECURITY</Rule>
+            </ExcludeRules>
+        </Filter>
+    </Filters>
+    
+    <!-- Severity Mappings -->
+    <SeverityMappings>
+        <Mapping rule="SQL_INJECTION" severity="Critical"/>
+        <Mapping rule="XSS_PREVENTION" severity="High"/>
+        <Mapping rule="SPRING_SECURITY_CONFIG" severity="High"/>
+        <Mapping rule="VIRTUAL_THREAD_SAFETY" severity="High"/>
+        <Mapping rule="SENSITIVE_DATA" severity="High"/>
+        <Mapping rule="CRYPTO_ISSUES" severity="High"/>
+        <Mapping rule="INPUT_VALIDATION" severity="Medium"/>
+        <Mapping rule="CONFIG_SECURITY" severity="Medium"/>
+    </SeverityMappings>
+</RuleSet>

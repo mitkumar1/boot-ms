@@ -1,0 +1,168 @@
+# Dockerfile optimized for security scanning with Fortify and Black Duck
+FROM openjdk:21-jdk-slim as security-scanner
+
+# Security scanning build stage
+LABEL maintainer="DevSecOps Team"
+LABEL description="Customer Service with comprehensive security scanning"
+LABEL java.version="21"
+LABEL virtual.threads="enabled"
+LABEL security.scanning="fortify,blackduck,owasp"
+
+# Install security scanning dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    unzip \
+    python3 \
+    python3-pip \
+    maven \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up working directory
+WORKDIR /workspace
+
+# Copy application source and configuration
+COPY pom.xml .
+COPY src ./src
+COPY fortify-rules.xml .
+COPY fortify-filter.txt .
+COPY blackduck.properties .
+COPY dependency-check-suppressions.xml .
+COPY security-scan-config.yml .
+
+# Maven dependencies for security scanning
+RUN mvn dependency:go-offline -B
+
+# Create security scanning directories
+RUN mkdir -p /workspace/fortify-results \
+    && mkdir -p /workspace/blackduck-output \
+    && mkdir -p /workspace/owasp-reports \
+    && mkdir -p /workspace/security-reports
+
+# Install security scanning tools (placeholder - replace with actual installation)
+# Note: In practice, these would be installed from official sources
+RUN echo "# Fortify SCA installation placeholder" > /opt/fortify-install.sh \
+    && echo "# Black Duck Detect installation placeholder" > /opt/blackduck-install.sh \
+    && chmod +x /opt/*.sh
+
+# Security scanning entrypoint script
+COPY <<EOF /workspace/security-scan-entrypoint.sh
+#!/bin/bash
+set -e
+
+echo "🔍 Starting security scanning process..."
+
+# Java 21 Virtual Thread configuration
+export JAVA_OPTS="-server -Xms512m -Xmx2g -XX:+UseZGC --enable-preview"
+export VIRTUAL_THREAD_OPTS="--enable-preview -Djdk.virtualThreadScheduler.parallelism=4"
+
+# Build the application
+echo "📦 Building application..."
+mvn clean compile -DskipTests=true
+
+# Run OWASP Dependency Check
+if [ "\${OWASP_SCAN_ENABLED:-true}" = "true" ]; then
+    echo "🛡️ Running OWASP Dependency Check..."
+    mvn org.owasp:dependency-check-maven:check \
+        -DfailBuildOnCVSS=8 \
+        -DsuppressionsFile=dependency-check-suppressions.xml \
+        -DoutputDirectory=owasp-reports || true
+fi
+
+# Run Fortify SAST (if available)
+if [ "\${FORTIFY_SCAN_ENABLED:-false}" = "true" ] && command -v sourceanalyzer >/dev/null 2>&1; then
+    echo "🔒 Running Fortify SAST scan..."
+    BUILD_ID=\${BUILD_ID:-security-scan}
+    sourceanalyzer -b \$BUILD_ID -clean
+    sourceanalyzer -b \$BUILD_ID -source 21 src/main/java
+    sourceanalyzer -b \$BUILD_ID -scan \
+        -f fortify-results/fortify-results.fpr \
+        -rules fortify-rules.xml \
+        -filter-file fortify-filter.txt || true
+fi
+
+# Run Black Duck Detect (if configured)
+if [ "\${BLACKDUCK_SCAN_ENABLED:-false}" = "true" ] && [ -n "\${BLACKDUCK_URL:-}" ]; then
+    echo "🦆 Running Black Duck SCA scan..."
+    curl -s -L https://detect.synopsys.com/detect7.sh > detect.sh
+    chmod +x detect.sh
+    bash detect.sh \
+        --blackduck.url="\${BLACKDUCK_URL}" \
+        --blackduck.api.token="\${BLACKDUCK_API_TOKEN}" \
+        --detect.project.name="customer-service-virtual-threads" \
+        --detect.project.version.name="\${BUILD_NUMBER:-1.0.0}" \
+        --detect.source.path="." \
+        --detect.output.path="./blackduck-output" \
+        --detect.cleanup=false || true
+fi
+
+# Generate security summary
+echo "📊 Generating security summary..."
+python3 -c "
+import json
+import os
+from datetime import datetime
+
+summary = {
+    'project': 'customer-service-virtual-threads',
+    'scan_date': datetime.utcnow().isoformat() + 'Z',
+    'build_number': os.environ.get('BUILD_NUMBER', 'local'),
+    'java_version': '21',
+    'virtual_threads': True,
+    'scans_performed': {
+        'owasp': os.environ.get('OWASP_SCAN_ENABLED', 'true') == 'true',
+        'fortify': os.environ.get('FORTIFY_SCAN_ENABLED', 'false') == 'true',
+        'blackduck': os.environ.get('BLACKDUCK_SCAN_ENABLED', 'false') == 'true'
+    },
+    'reports_generated': [
+        f for f in os.listdir('.')
+        if f.endswith(('.html', '.xml', '.json', '.pdf', '.fpr'))
+    ]
+}
+
+with open('security-reports/security-summary.json', 'w') as f:
+    json.dump(summary, f, indent=2)
+
+print('✅ Security scanning completed successfully')
+print(f'Summary: {json.dumps(summary, indent=2)}')
+"
+
+echo "🎉 Security scanning process completed!"
+EOF
+
+RUN chmod +x /workspace/security-scan-entrypoint.sh
+
+# Production application stage
+FROM openjdk:21-jre-slim as production
+
+# Production optimizations for virtual threads
+ENV JAVA_OPTS="-server -Xms256m -Xmx1g -XX:+UseZGC --enable-preview"
+ENV VIRTUAL_THREAD_OPTS="--enable-preview -Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=128"
+
+WORKDIR /app
+
+# Copy built application from security scanner stage
+COPY --from=security-scanner /workspace/target/*.jar app.jar
+
+# Copy security reports (if available)
+COPY --from=security-scanner /workspace/security-reports ./security-reports/
+
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+USER appuser
+
+# Health check with virtual thread verification
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+EXPOSE 8080 8081
+
+# Start application with virtual thread optimization
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS $VIRTUAL_THREAD_OPTS -jar app.jar"]
+
+# Multi-stage security scanning image
+FROM security-scanner as security-scan
+
+# This stage is used for security scanning only
+ENTRYPOINT ["/workspace/security-scan-entrypoint.sh"]

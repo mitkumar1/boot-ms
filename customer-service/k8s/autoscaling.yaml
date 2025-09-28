@@ -1,0 +1,159 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: customer-service-hpa
+  namespace: default
+  labels:
+    app: customer-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: customer-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: customer-service-pdb
+  namespace: default
+  labels:
+    app: customer-service
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: customer-service
+
+---
+# Custom Resource for Circuit Breaker monitoring (if using Istio or similar)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: resilience4j-dashboard-config
+  namespace: default
+  labels:
+    app: customer-service
+data:
+  grafana-dashboard.json: |
+    {
+      "dashboard": {
+        "title": "Customer Service - Resilience4j Metrics",
+        "panels": [
+          {
+            "title": "Circuit Breaker State",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "resilience4j_circuitbreaker_state{name=\"customer-service\"}"
+              }
+            ]
+          },
+          {
+            "title": "Circuit Breaker Failure Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(resilience4j_circuitbreaker_failure_rate{name=\"customer-service\"}[5m])"
+              }
+            ]
+          },
+          {
+            "title": "Retry Attempts",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(resilience4j_retry_calls_total{name=\"customer-service\"}[5m])"
+              }
+            ]
+          },
+          {
+            "title": "Rate Limiter",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "resilience4j_ratelimiter_available_permissions{name=\"customer-service\"}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+---
+# Health Check Job for monitoring
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: customer-service-health-check
+  namespace: default
+  labels:
+    app: customer-service
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: health-checker
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Checking customer-service health..."
+              response=$(curl -s -o /dev/null -w "%{http_code}" http://customer-service.default.svc.cluster.local/actuator/health)
+              if [ "$response" != "200" ]; then
+                echo "Health check failed with status: $response"
+                exit 1
+              fi
+              echo "Health check passed"
+              
+              # Check circuit breaker status
+              circuit_status=$(curl -s http://customer-service.default.svc.cluster.local/actuator/health/circuitBreakers | jq -r '.status')
+              if [ "$circuit_status" != "UP" ]; then
+                echo "Circuit breaker is not healthy: $circuit_status"
+                # Could send alert here
+              fi
+          restartPolicy: OnFailure
+      backoffLimit: 3

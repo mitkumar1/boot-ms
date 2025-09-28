@@ -1,29 +1,211 @@
 server:
   port: 4040
+  # Optimize Tomcat for virtual threads
+  tomcat:
+    threads:
+      max: 200  # Lower than traditional as virtual threads are lightweight
+      min-spare: 10
 
 spring:
   application:
     name: customer-service
+  
+  # Task execution configuration for virtual threads
+  task:
+    execution:
+      pool:
+        core-size: 8
+        max-size: 20
+        queue-capacity: 100
+        thread-name-prefix: "vt-exec-"
+    scheduling:
+      pool:
+        size: 10
+        thread-name-prefix: "vt-sched-"
 
-
-  # database config
+  # Database config
   datasource:
-    url: jdbc:h2:mem:books_data
+    url: jdbc:h2:mem:customer_data
     driver-class-name: org.h2.Driver
     username: sa
     password:
 
   jpa:
     database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
 
-  #  enabling the H2 console
+  # Enabling the H2 console
   h2:
     console:
       enabled: true
+      path: /h2-console
 
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8040/eureka
-  instance:
-    prefer-ip-address: true
+  # Kubernetes-aware Cloud Configuration
+  cloud:
+    loadbalancer:
+      enabled: true
+      retry:
+        enabled: true
+      health-check:
+        enabled: true
+        initial-delay: 10s
+        interval: 30s
+        
+    kubernetes:
+      enabled: true
+      discovery:
+        enabled: true
+        service-labels:
+          app: customer-service
+        namespace: ${KUBERNETES_NAMESPACE:default}
+    
+    circuitbreaker:
+      resilience4j:
+        enabled: true
+
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+
+
+# Actuator Configuration for Monitoring (Enhanced)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,env,beans,configprops,refresh,circuitbreakers,scheduledtasks
+  endpoint:
+    health:
+      show-details: always
+    refresh:
+      access: unrestricted
+
+  info:
+    env:
+      enabled: true
+    build:
+      enabled: true
+    git:
+      enabled: true
+
+# Enhanced Resilience4j for Kubernetes
+resilience4j:
+  circuitbreaker:
+    instances:
+      default:
+        register-health-indicator: true
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        permitted-number-of-calls-in-half-open-state: 5
+        wait-duration-in-open-state: 10s
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 3s
+        slow-call-rate-threshold: 30
+        automatic-transition-from-open-to-half-open-enabled: true
+        
+      external-service:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        permitted-number-of-calls-in-half-open-state: 3
+        wait-duration-in-open-state: 15s
+        failure-rate-threshold: 60
+        slow-call-duration-threshold: 5s
+        
+      kubernetes-service:
+        register-health-indicator: true
+        sliding-window-size: 15
+        minimum-number-of-calls: 8
+        permitted-number-of-calls-in-half-open-state: 4
+        wait-duration-in-open-state: 20s
+        failure-rate-threshold: 40
+        slow-call-duration-threshold: 2s
+
+  retry:
+    instances:
+      default:
+        max-attempts: 3
+        wait-duration: 1s
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - java.net.ConnectException
+          - java.net.SocketTimeoutException
+        
+      kubernetes-service:
+        max-attempts: 5
+        wait-duration: 2s
+        exponential-backoff-multiplier: 1.5
+        retry-exceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - java.net.ConnectException
+
+  ratelimiter:
+    instances:
+      default:
+        limit-for-period: 20
+        limit-refresh-period: 1s
+        timeout-duration: 5s
+        
+      api-requests:
+        limit-for-period: 100
+        limit-refresh-period: 1s
+        timeout-duration: 3s
+
+  timelimiter:
+    instances:
+      default:
+        timeout-duration: 10s
+        cancel-running-future: true
+        
+      kubernetes-service:
+        timeout-duration: 15s
+        cancel-running-future: true
+
+  bulkhead:
+    instances:
+      default:
+        max-concurrent-calls: 10
+        max-wait-duration: 2s
+        
+      api-calls:
+        max-concurrent-calls: 25
+        max-wait-duration: 5s
+
+# Logging Configuration (Enhanced for Virtual Threads)
+logging:
+  level:
+    '[com.kumar.mithlesh]': INFO
+    '[org.springframework.cloud]': INFO
+    '[org.springframework.web]': INFO
+    '[org.springframework.scheduling]': DEBUG
+    '[org.springframework.task]': DEBUG
+    '[org.hibernate.SQL]': DEBUG
+    '[org.hibernate.type]': TRACE
+    '[resilience4j]': DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+---
+# Local development profile (no config server)
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  cloud:
+    config:
+      enabled: false
+
+# Override for local development
+server:
+  port: 4041

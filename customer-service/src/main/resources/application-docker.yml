@@ -1,0 +1,122 @@
+server:
+  port: 4040
+
+spring:
+  application:
+    name: customer-service
+  
+  # Docker-specific configuration
+  cloud:
+    config:
+      enabled: true
+      uri: http://config-server:8888
+      fail-fast: false
+      retry:
+        initial-interval: 1000
+        multiplier: 1.1
+        max-attempts: 6
+
+  # Database config (using H2 for demo, replace with PostgreSQL/MySQL in production)
+  datasource:
+    url: jdbc:h2:mem:customer_data
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  # H2 Console enabled for development
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true
+
+# Management endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers,ratelimiters,retries,bulkheads,timelimiters
+  endpoint:
+    health:
+      show-details: always
+  health:
+    circuitbreakers:
+      enabled: true
+
+# Logging configuration for Docker
+logging:
+  level:
+    com.kumar.mithlesh: INFO
+    io.github.resilience4j: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n"
+
+# Resilience4j configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      default:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+      external-service:
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 60s
+        sliding-window-size: 20
+      kubernetes-service:
+        failure-rate-threshold: 40
+        wait-duration-in-open-state: 45s
+        sliding-window-size: 15
+        
+  retry:
+    instances:
+      default:
+        max-attempts: 3
+        wait-duration: 2s
+      external-service:
+        max-attempts: 5
+        wait-duration: 1s
+        exponential-backoff-multiplier: 2
+        
+  ratelimiter:
+    instances:
+      default:
+        limit-for-period: 100
+        limit-refresh-period: 1s
+        timeout-duration: 0s
+      external-service:
+        limit-for-period: 50
+        limit-refresh-period: 1s
+
+  bulkhead:
+    instances:
+      default:
+        max-concurrent-calls: 50
+      external-service:
+        max-concurrent-calls: 25
+
+  thread-pool-bulkhead:
+    instances:
+      default:
+        core-thread-pool-size: 5
+        max-thread-pool-size: 20
+        queue-capacity: 100
+
+  timelimiter:
+    instances:
+      default:
+        timeout-duration: 10s
+      external-service:
+        timeout-duration: 5s

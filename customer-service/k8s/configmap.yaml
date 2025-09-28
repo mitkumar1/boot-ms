@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: customer-service-config
+  namespace: default
+  labels:
+    app: customer-service
+    version: v1
+data:
+  # Application configuration
+  application.yml: |
+    server:
+      port: 8080
+      shutdown: graceful
+      
+    spring:
+      application:
+        name: customer-service
+      lifecycle:
+        timeout-per-shutdown-phase: 30s
+        
+      # Database config for Kubernetes
+      datasource:
+        url: ${DATABASE_URL:jdbc:h2:mem:customer_data}
+        driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
+        username: ${DATABASE_USERNAME:sa}
+        password: ${DATABASE_PASSWORD:}
+        
+      # Kubernetes service discovery
+      cloud:
+        kubernetes:
+          discovery:
+            enabled: true
+            all-namespaces: false
+            namespace: ${KUBERNETES_NAMESPACE:default}
+            service-labels:
+              app: customer-service
+              
+        loadbalancer:
+          enabled: true
+          health-check:
+            enabled: true
+            
+    # Kubernetes-optimized Resilience4j
+    resilience4j:
+      circuitbreaker:
+        instances:
+          kubernetes-service:
+            register-health-indicator: true
+            sliding-window-size: 20
+            minimum-number-of-calls: 10
+            failure-rate-threshold: 50
+            wait-duration-in-open-state: 20s
+            
+    # Actuator for Kubernetes probes
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus
+          base-path: /actuator
+      endpoint:
+        health:
+          show-details: always
+          probes:
+            enabled: true
+      health:
+        livenessstate:
+          enabled: true
+        readinessstate:
+          enabled: true
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+      server:
+        port: 9090
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: customer-service-secrets
+  namespace: default
+  labels:
+    app: customer-service
+type: Opaque
+data:
+  # Base64 encoded secrets (replace with actual values)
+  database-password: ""  # Empty for H2, replace with actual DB password
+  jwt-secret: Y3VzdG9tZXItc2VydmljZS1qd3Qtc2VjcmV0  # customer-service-jwt-secret

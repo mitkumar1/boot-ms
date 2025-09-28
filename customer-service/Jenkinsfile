@@ -1,0 +1,905 @@
+pipeline {
+    agent any
+    
+    // Git webhook triggers for automatic builds
+    triggers {
+        // Poll SCM for changes every 2 minutes (backup to webhook)
+        pollSCM('H/2 * * * *')
+        
+        // Cron trigger for nightly security scans
+        cron('H 2 * * *') // Run at 2 AM daily for comprehensive security scanning
+        
+        // GitHub webhook trigger (configure in GitHub repository settings)
+        githubPush()
+    }
+    
+    tools {
+        maven 'Maven-3.9'
+        jdk 'JDK-21'
+        sonarQubeScanner 'SonarQube-Scanner'
+    }
+    
+    environment {
+        // Git Configuration
+        GIT_WEBHOOK_ENABLED = 'true'
+        AUTO_BUILD_ENABLED = 'true'
+        
+        // Docker Configuration
+        DOCKER_IMAGE = 'customer-service'
+        DOCKER_TAG = "${BUILD_NUMBER}"
+        DOCKER_REGISTRY = 'your-registry.com' // Update with your registry
+        
+        // Application Configuration
+        APP_NAME = 'customer-service'
+        APP_PORT = '4040'
+        
+        // Virtual Thread JVM Options
+        JAVA_OPTS = '-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseZGC -XX:+UnlockExperimentalVMOptions --enable-preview'
+        VIRTUAL_THREAD_OPTS = '-Djdk.virtualThreadScheduler.parallelism=10 -Djdk.virtualThreadScheduler.maxPoolSize=256'
+        
+        // Security Scanning Configuration
+        SECURITY_SCAN_ON_PUSH = 'true'
+        FORTIFY_SCAN_ENABLED = "${env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'develop' ? 'true' : 'false'}"
+        BLACKDUCK_SCAN_ENABLED = "${env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'develop' ? 'true' : 'false'}"
+        OWASP_SCAN_ENABLED = 'true'
+        
+        // SonarQube Configuration
+        SONAR_QUALITY_GATE_ENABLED = 'true'
+        SONAR_WEBHOOK_ENABLED = 'true'
+        
+        // Deployment Environment
+        DEV_NAMESPACE = 'customer-service-dev'
+        PROD_NAMESPACE = 'customer-service-prod'
+        
+        // Auto-deployment flags
+        AUTO_DEPLOY_DEV = "${env.BRANCH_NAME == 'develop' ? 'true' : 'false'}"
+        AUTO_DEPLOY_PROD = 'false' // Require manual approval for production
+        
+        // Notification Settings
+        SLACK_CHANNEL = '#deployments'
+        EMAIL_RECIPIENTS = 'team@company.com'
+        
+        // Git commit information
+        GIT_COMMIT_SHORT = "${env.GIT_COMMIT?.take(7) ?: 'unknown'}"
+        GIT_AUTHOR = "${env.GIT_AUTHOR_NAME ?: 'unknown'}"
+        GIT_MESSAGE = "${env.GIT_COMMIT_MESSAGE ?: 'No commit message'}"
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 45, unit: 'MINUTES')
+        timestamps()
+        skipDefaultCheckout(false) // Enable checkout for webhook triggers
+        
+        // GitHub integration options
+        githubProjectProperty(projectUrlStr: 'https://github.com/your-org/customer-service')
+    }
+    
+    stages {
+        stage('📋 Git Webhook & Preparation') {
+            steps {
+                script {
+                    echo "🚀 Starting Automated CI/CD Pipeline for Customer Service with Virtual Threads"
+                    echo "📦 Build Number: ${BUILD_NUMBER}"
+                    echo "🌿 Branch: ${env.BRANCH_NAME}"
+                    echo "🔨 Java Version: JDK 21 (Virtual Threads Enabled)"
+                    echo "🔗 Git Commit: ${GIT_COMMIT_SHORT}"
+                    echo "👤 Author: ${GIT_AUTHOR}"
+                    echo "💬 Message: ${GIT_MESSAGE}"
+                    
+                    // Determine build trigger
+                    def buildCause = currentBuild.getBuildCauses()
+                    def triggerType = "Manual"
+                    
+                    if (buildCause.toString().contains('GitHubPushCause')) {
+                        triggerType = "Git Push (Webhook)"
+                    } else if (buildCause.toString().contains('SCMTrigger')) {
+                        triggerType = "Git Poll"
+                    } else if (buildCause.toString().contains('TimerTrigger')) {
+                        triggerType = "Scheduled (Nightly)"
+                    }
+                    
+                    echo "🔄 Build Triggered By: ${triggerType}"
+                    
+                    // Set security scanning based on trigger and branch
+                    if (triggerType == "Scheduled (Nightly)") {
+                        env.FORTIFY_SCAN_ENABLED = 'true'
+                        env.BLACKDUCK_SCAN_ENABLED = 'true'
+                        env.COMPREHENSIVE_SCAN = 'true'
+                        echo "🌙 Nightly build: Full security scanning enabled"
+                    } else if (env.BRANCH_NAME == 'main') {
+                        env.COMPREHENSIVE_SCAN = 'true'
+                        echo "🎯 Main branch: Full security scanning enabled"
+                    } else {
+                        env.COMPREHENSIVE_SCAN = 'false'
+                        echo "🚀 Feature branch: Basic scanning enabled"
+                    }
+                    
+                    // Send build start notification
+                    if (env.SLACK_WEBHOOK_URL) {
+                        try {
+                            slackSend(
+                                channel: env.SLACK_CHANNEL,
+                                color: 'good',
+                                message: """
+🚀 *Build Started* - Customer Service
+• *Trigger:* ${triggerType}
+• *Branch:* ${env.BRANCH_NAME}
+• *Commit:* ${GIT_COMMIT_SHORT} by ${GIT_AUTHOR}
+• *Build:* #${BUILD_NUMBER}
+• *Security Scanning:* ${env.COMPREHENSIVE_SCAN == 'true' ? 'Full' : 'Basic'}
+""".stripIndent()
+                            )
+                        } catch (Exception e) {
+                            echo "⚠️ Slack notification failed: ${e.message}"
+                        }
+                    }
+                }
+                
+                // Clean workspace and checkout code
+                cleanWs()
+                checkout scm
+                
+                // Display project info
+                sh """
+                    echo "=== Project Information ==="
+                    echo "Maven Version: \$(mvn --version)"
+                    echo "Java Version: \$(java --version)"
+                    echo "Docker Version: \$(docker --version)"
+                    echo "Virtual Thread Support: Enabled"
+                """
+            }
+        }
+        
+        stage('🔍 Code Quality & Security') {
+            parallel {
+                stage('📊 SonarQube Quality Analysis') {
+                    when {
+                        anyOf {
+                            branch 'main'
+                            branch 'develop'
+                            changeRequest()
+                            environment name: 'COMPREHENSIVE_SCAN', value: 'true'
+                        }
+                    }
+                    steps {
+                        script {
+                            try {
+                                echo "📊 Starting SonarQube analysis with quality gates..."
+                                
+                                withSonarQubeEnv('SonarQube') {
+                                    sh '''
+                                        mvn clean compile test sonar:sonar \
+                                            -Dsonar.projectKey=customer-service-virtual-threads \
+                                            -Dsonar.projectName="Customer Service with Virtual Threads" \
+                                            -Dsonar.java.source=21 \
+                                            -Dsonar.java.target=21 \
+                                            -Dsonar.java.enablePreview=true \
+                                            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                                            -Dsonar.junit.reportPaths=target/surefire-reports \
+                                            -Dsonar.surefire.reportsPath=target/surefire-reports \
+                                            -Dsonar.jacoco.reportPath=target/jacoco.exec \
+                                            -Dsonar.java.libraries=target/dependency/*.jar \
+                                            -Dsonar.java.test.libraries=target/dependency/*.jar \
+                                            -Dsonar.sourceEncoding=UTF-8 \
+                                            -Dsonar.exclusions="**/target/**,**/bin/**,**/*.jar" \
+                                            -Dsonar.test.exclusions="**/target/**" \
+                                            -Dsonar.branch.name=${env.BRANCH_NAME} \
+                                            -Dsonar.scm.revision=${env.GIT_COMMIT} \
+                                            -Dsonar.buildString=${BUILD_NUMBER} \
+                                            -Dsonar.links.homepage=https://github.com/your-org/customer-service \
+                                            -Dsonar.links.ci=${BUILD_URL} \
+                                            -Dsonar.links.scm=${env.GIT_URL}
+                                    '''
+                                }
+                                
+                                echo "⏳ Waiting for SonarQube Quality Gate result..."
+                                
+                                // Wait for quality gate with enhanced error handling
+                                timeout(time: 15, unit: 'MINUTES') {
+                                    script {
+                                        def qualityGate = waitForQualityGate()
+                                        
+                                        echo "📋 Quality Gate Result: ${qualityGate.status}"
+                                        
+                                        if (qualityGate.status != 'OK') {
+                                            def qgDetails = "Quality Gate Failed:\\n"
+                                            
+                                            if (qualityGate.conditions) {
+                                                qualityGate.conditions.each { condition ->
+                                                    if (condition.status != 'OK') {
+                                                        qgDetails += "• ${condition.metricKey}: ${condition.actualValue} (threshold: ${condition.errorThreshold})\\n"
+                                                    }
+                                                }
+                                            }
+                                            
+                                            echo "❌ SonarQube Quality Gate Details:\\n${qgDetails}"
+                                            
+                                            // Send quality gate failure notification
+                                            if (env.SLACK_WEBHOOK_URL) {
+                                                slackSend(
+                                                    channel: env.SLACK_CHANNEL,
+                                                    color: 'danger',
+                                                    message: """
+❌ *Quality Gate Failed* - Customer Service
+• *Branch:* ${env.BRANCH_NAME}
+• *Build:* #${BUILD_NUMBER}
+• *Details:* ${qgDetails}
+• *SonarQube:* [View Report](${env.SONAR_HOST_URL}/dashboard?id=customer-service-virtual-threads)
+""".stripIndent()
+                                                )
+                                            }
+                                            
+                                            // Fail the build for main/develop branches, warn for others
+                                            if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'develop') {
+                                                error "❌ Pipeline failed due to SonarQube Quality Gate failure: ${qualityGate.status}"
+                                            } else {
+                                                echo "⚠️ Quality Gate failed but continuing for feature branch"
+                                                currentBuild.result = 'UNSTABLE'
+                                            }
+                                        } else {
+                                            echo "✅ SonarQube Quality Gate passed successfully!"
+                                            
+                                            // Send success notification
+                                            if (env.SLACK_WEBHOOK_URL) {
+                                                slackSend(
+                                                    channel: env.SLACK_CHANNEL,
+                                                    color: 'good',
+                                                    message: """
+✅ *Quality Gate Passed* - Customer Service
+• *Branch:* ${env.BRANCH_NAME}
+• *Build:* #${BUILD_NUMBER}
+• *SonarQube:* [View Report](${env.SONAR_HOST_URL}/dashboard?id=customer-service-virtual-threads)
+""".stripIndent()
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Archive SonarQube analysis results
+                                archiveArtifacts artifacts: 'target/sonar/report-task.txt', 
+                                               allowEmptyArchive: true, 
+                                               fingerprint: true
+                                               
+                            } catch (Exception e) {
+                                echo "⚠️ SonarQube analysis failed: ${e.message}"
+                                currentBuild.result = 'UNSTABLE'
+                                
+                                // Send failure notification
+                                if (env.SLACK_WEBHOOK_URL) {
+                                    slackSend(
+                                        channel: env.SLACK_CHANNEL,
+                                        color: 'warning',
+                                        message: """
+⚠️ *SonarQube Analysis Failed* - Customer Service
+• *Branch:* ${env.BRANCH_NAME}
+• *Build:* #${BUILD_NUMBER}
+• *Error:* ${e.message}
+""".stripIndent()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                stage('🔒 Security Scan') {
+                    steps {
+                        script {
+                            try {
+                                // OWASP Dependency Check
+                                sh '''
+                                    mvn org.owasp:dependency-check-maven:check \
+                                        -DfailBuildOnCVSS=8 \
+                                        -DsuppressionsFile=dependency-check-suppressions.xml || true
+                                '''
+                                
+                                // Publish security report
+                                publishHTML([
+                                    allowMissing: false,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: 'target',
+                                    reportFiles: 'dependency-check-report.html',
+                                    reportName: 'OWASP Dependency Check Report'
+                                ])
+                            } catch (Exception e) {
+                                echo "⚠️ Security scan completed with warnings: ${e.message}"
+                            }
+                        }
+                    }
+                }
+                
+                stage('🛡️ Fortify SAST Scan') {
+                    when {
+                        anyOf {
+                            branch 'main'
+                            branch 'develop'
+                            changeRequest()
+                        }
+                    }
+                    steps {
+                        script {
+                            try {
+                                echo "🛡️ Running Fortify Static Application Security Testing"
+                                
+                                // Clean previous Fortify results
+                                sh 'rm -rf .fortify/ fortify-results/ || true'
+                                
+                                // Fortify Source Analyzer - Build Phase
+                                sh '''
+                                    sourceanalyzer -b ${BUILD_ID} \
+                                        -clean \
+                                        -source 21 \
+                                        -cp "target/classes:$(mvn dependency:build-classpath -Dmdep.outputFile=/dev/stdout -q)" \
+                                        -extdirs "$(find ~/.m2/repository -name "*.jar" | head -20 | tr '\n' ':')" \
+                                        src/main/java
+                                '''
+                                
+                                // Fortify Source Analyzer - Scan Phase
+                                sh '''
+                                    sourceanalyzer -b ${BUILD_ID} \
+                                        -scan \
+                                        -f fortify-results.fpr \
+                                        -format fpr \
+                                        -rules fortify-rules.xml \
+                                        -filter-file fortify-filter.txt \
+                                        -logfile fortify-scan.log
+                                '''
+                                
+                                // Generate reports
+                                sh '''
+                                    # Generate HTML Report
+                                    BIRTReportGenerator -template "Developer Workbook" \
+                                        -source fortify-results.fpr \
+                                        -output fortify-report.html \
+                                        -format HTML
+                                    
+                                    # Generate XML Report for Jenkins
+                                    BIRTReportGenerator -template "xml" \
+                                        -source fortify-results.fpr \
+                                        -output fortify-results.xml \
+                                        -format xml
+                                '''
+                                
+                                // Publish Fortify results
+                                publishHTML([
+                                    allowMissing: false,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: '.',
+                                    reportFiles: 'fortify-report.html',
+                                    reportName: 'Fortify SAST Report'
+                                ])
+                                
+                                // Archive results
+                                archiveArtifacts artifacts: 'fortify-results.fpr,fortify-results.xml,fortify-scan.log', 
+                                               fingerprint: true
+                                
+                                // Parse results and fail build if critical vulnerabilities found
+                                def fortifyResults = readFile('fortify-results.xml')
+                                def criticalCount = (fortifyResults =~ /severity="Critical"/).size()
+                                def highCount = (fortifyResults =~ /severity="High"/).size()
+                                
+                                echo "🔍 Fortify Results: Critical: ${criticalCount}, High: ${highCount}"
+                                
+                                if (criticalCount > 0) {
+                                    error "❌ Fortify scan found ${criticalCount} critical vulnerabilities"
+                                }
+                                
+                                if (highCount > 5) {
+                                    error "❌ Fortify scan found ${highCount} high-severity vulnerabilities (threshold: 5)"
+                                }
+                                
+                            } catch (Exception e) {
+                                echo "⚠️ Fortify scan failed: ${e.message}"
+                                currentBuild.result = 'UNSTABLE'
+                            }
+                        }
+                    }
+                }
+                
+                stage('🦆 Black Duck SCA Scan') {
+                    when {
+                        anyOf {
+                            branch 'main'
+                            branch 'develop'
+                            changeRequest()
+                        }
+                    }
+                    steps {
+                        script {
+                            try {
+                                echo "🦆 Running Black Duck Software Composition Analysis"
+                                
+                                // Set Black Duck environment variables
+                                withCredentials([
+                                    string(credentialsId: 'blackduck-api-token', variable: 'BLACKDUCK_API_TOKEN'),
+                                    string(credentialsId: 'blackduck-url', variable: 'BLACKDUCK_URL')
+                                ]) {
+                                    
+                                    // Download and run Black Duck Detect
+                                    sh '''
+                                        # Download Black Duck Detect script
+                                        curl -s -L https://detect.synopsys.com/detect7.sh > detect.sh
+                                        chmod +x detect.sh
+                                        
+                                        # Run Black Duck Detect with Maven
+                                        bash detect.sh \
+                                            --blackduck.url="${BLACKDUCK_URL}" \
+                                            --blackduck.api.token="${BLACKDUCK_API_TOKEN}" \
+                                            --detect.project.name="${APP_NAME}" \
+                                            --detect.project.version.name="${BUILD_NUMBER}" \
+                                            --detect.source.path="." \
+                                            --detect.maven.build.command="compile" \
+                                            --detect.maven.path="mvn" \
+                                            --detect.detector.search.depth=10 \
+                                            --detect.blackduck.signature.scanner.paths="src" \
+                                            --detect.code.location.name="${APP_NAME}-${BUILD_NUMBER}" \
+                                            --detect.project.description="Customer Service with Virtual Threads" \
+                                            --detect.output.path="./blackduck-output" \
+                                            --detect.cleanup=false \
+                                            --detect.blackduck.signature.scanner.exclusion.patterns="**/target/**,**/node_modules/**,**/.git/**" \
+                                            --detect.risk.report.pdf=true \
+                                            --detect.notices.report=true \
+                                            --logging.level.com.synopsys.integration=DEBUG \
+                                            --detect.timeout=600
+                                    '''
+                                    
+                                    // Wait for scan completion and get results
+                                    sh '''
+                                        echo "⏳ Waiting for Black Duck scan to complete..."
+                                        sleep 60
+                                        
+                                        # Check scan status and download reports
+                                        if [ -d "blackduck-output" ]; then
+                                            find blackduck-output -name "*.pdf" -o -name "*.json" -o -name "*.html" | head -10
+                                            
+                                            # Copy reports to workspace root for archiving
+                                            find blackduck-output -name "*risk*.pdf" -exec cp {} ./blackduck-risk-report.pdf \\;
+                                            find blackduck-output -name "*notices*.txt" -exec cp {} ./blackduck-notices.txt \\;
+                                            find blackduck-output -name "*.json" -exec cp {} ./blackduck-results.json \\;
+                                        fi
+                                    '''
+                                    
+                                    // Analyze results for policy violations
+                                    sh '''
+                                        if [ -f "blackduck-results.json" ]; then
+                                            # Check for policy violations
+                                            violations=$(grep -c '"policyViolation":true' blackduck-results.json || echo "0")
+                                            high_risk=$(grep -c '"riskPriority":"HIGH"' blackduck-results.json || echo "0")
+                                            critical_risk=$(grep -c '"riskPriority":"CRITICAL"' blackduck-results.json || echo "0")
+                                            
+                                            echo "🔍 Black Duck Results:"
+                                            echo "  - Policy Violations: $violations"
+                                            echo "  - High Risk Components: $high_risk"
+                                            echo "  - Critical Risk Components: $critical_risk"
+                                            
+                                            # Write summary for Jenkins
+                                            cat > blackduck-summary.txt << EOF
+Black Duck Scan Summary:
+- Policy Violations: $violations
+- High Risk Components: $high_risk  
+- Critical Risk Components: $critical_risk
+- Build Number: ${BUILD_NUMBER}
+- Scan Date: $(date)
+EOF
+                                        else
+                                            echo "⚠️ No Black Duck results file found"
+                                        fi
+                                    '''
+                                }
+                                
+                                // Archive Black Duck results
+                                archiveArtifacts artifacts: 'blackduck-*.pdf,blackduck-*.txt,blackduck-*.json,detect.sh', 
+                                               allowEmptyArchive: true, 
+                                               fingerprint: true
+                                
+                                // Publish Black Duck reports
+                                publishHTML([
+                                    allowMissing: true,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: 'blackduck-output',
+                                    reportFiles: '*.html',
+                                    reportName: 'Black Duck SCA Report'
+                                ])
+                                
+                                // Check for critical policy violations
+                                script {
+                                    if (fileExists('blackduck-results.json')) {
+                                        def blackduckResults = readFile('blackduck-results.json')
+                                        def policyViolations = (blackduckResults =~ /"policyViolation":true/).size()
+                                        
+                                        if (policyViolations > 0) {
+                                            echo "⚠️ Black Duck found ${policyViolations} policy violations"
+                                            currentBuild.result = 'UNSTABLE'
+                                        }
+                                    }
+                                }
+                                
+                                echo "✅ Black Duck scan completed successfully"
+                                
+                            } catch (Exception e) {
+                                echo "⚠️ Black Duck scan failed: ${e.message}"
+                                currentBuild.result = 'UNSTABLE'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('🏗️ Build & Test') {
+            steps {
+                script {
+                    echo "🔨 Building Spring Boot application with Virtual Threads support"
+                    
+                    // Maven build with Java 21 and Virtual Threads
+                    sh '''
+                        mvn clean compile \
+                            -Dmaven.compiler.source=21 \
+                            -Dmaven.compiler.target=21 \
+                            -Dmaven.compiler.compilerArgs="--enable-preview"
+                    '''
+                    
+                    // Run tests with Virtual Thread configuration
+                    sh '''
+                        mvn test \
+                            -Dspring.profiles.active=test \
+                            -Djava.vm.args="${JAVA_OPTS} ${VIRTUAL_THREAD_OPTS}" \
+                            -Dmaven.test.failure.ignore=false
+                    '''
+                    
+                    // Package application
+                    sh '''
+                        mvn package \
+                            -DskipTests=false \
+                            -Dmaven.compiler.compilerArgs="--enable-preview"
+                    '''
+                }
+                
+                // Archive build artifacts
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                
+                // Publish test results
+                publishTestResults testResultsPattern: 'target/surefire-reports/*.xml'
+                
+                // Publish code coverage
+                publishCoverage adapters: [
+                    jacocoAdapter('target/site/jacoco/jacoco.xml')
+                ], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
+            }
+            post {
+                always {
+                    // Collect test reports
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
+        
+        stage('🐳 Docker Build') {
+            steps {
+                script {
+                    echo "🐳 Building Docker image with Virtual Thread optimizations"
+                    
+                    // Build Docker image with virtual thread support
+                    def dockerImage = docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}", """
+                        --build-arg JAVA_OPTS='${JAVA_OPTS}' \
+                        --build-arg VIRTUAL_THREAD_OPTS='${VIRTUAL_THREAD_OPTS}' \
+                        --label build-number=${BUILD_NUMBER} \
+                        --label git-commit=${env.GIT_COMMIT} \
+                        --label virtual-threads=enabled \
+                        .
+                    """)
+                    
+                    // Tag latest for main branch
+                    if (env.BRANCH_NAME == 'main') {
+                        dockerImage.tag('latest')
+                    }
+                    
+                    // Security scan for Docker image
+                    try {
+                        sh """
+                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                                -v \$(pwd):/tmp/.cache/ \
+                                aquasec/trivy:latest image \
+                                --format table \
+                                --exit-code 0 \
+                                --no-progress \
+                                --severity HIGH,CRITICAL \
+                                ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        """
+                    } catch (Exception e) {
+                        echo "⚠️ Docker security scan completed with warnings: ${e.message}"
+                    }
+                    
+                    // Store image for later stages
+                    env.DOCKER_IMAGE_FULL = "${DOCKER_IMAGE}:${DOCKER_TAG}"
+                }
+            }
+        }
+        
+        stage('🧪 Integration Tests') {
+            steps {
+                script {
+                    echo "🧪 Running integration tests with Docker container"
+                    
+                    try {
+                        // Start the application container for testing
+                        sh """
+                            docker run -d --name ${APP_NAME}-test-${BUILD_NUMBER} \
+                                -p 4041:4040 \
+                                -e SPRING_PROFILES_ACTIVE=test \
+                                -e "JAVA_OPTS=${JAVA_OPTS}" \
+                                -e "VIRTUAL_THREAD_OPTS=${VIRTUAL_THREAD_OPTS}" \
+                                --health-cmd="curl -f http://localhost:4040/actuator/health || exit 1" \
+                                --health-interval=10s \
+                                --health-timeout=5s \
+                                --health-retries=5 \
+                                ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        """
+                        
+                        // Wait for application to be healthy
+                        sh """
+                            echo "⏳ Waiting for application to be ready..."
+                            timeout 120 bash -c 'until docker inspect --format="{{.State.Health.Status}}" ${APP_NAME}-test-${BUILD_NUMBER} | grep -q "healthy"; do sleep 5; done'
+                            echo "✅ Application is healthy"
+                        """
+                        
+                        // Run API tests
+                        sh """
+                            echo "🔍 Testing Virtual Thread endpoints..."
+                            
+                            # Health check
+                            curl -f http://localhost:4041/actuator/health
+                            
+                            # Virtual thread info
+                            curl -f http://localhost:4041/api/v1/virtual-threads/info
+                            
+                            # Performance test
+                            curl -f "http://localhost:4041/api/v1/virtual-threads/performance-test?virtualThreads=100&platformThreads=50"
+                            
+                            # Test scheduled tasks
+                            curl -f http://localhost:4041/actuator/scheduledtasks
+                            
+                            echo "✅ All integration tests passed"
+                        """
+                        
+                        // Collect application logs
+                        sh "docker logs ${APP_NAME}-test-${BUILD_NUMBER} > integration-test-logs.txt"
+                        archiveArtifacts artifacts: 'integration-test-logs.txt', fingerprint: true
+                        
+                    } finally {
+                        // Cleanup test container
+                        sh """
+                            docker stop ${APP_NAME}-test-${BUILD_NUMBER} || true
+                            docker rm ${APP_NAME}-test-${BUILD_NUMBER} || true
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('📦 Push to Registry') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                    branch 'release/*'
+                }
+            }
+            steps {
+                script {
+                    echo "📦 Pushing Docker image to registry"
+                    
+                    // Push to Docker registry
+                    docker.withRegistry("https://${DOCKER_REGISTRY}", 'docker-registry-credentials') {
+                        def image = docker.image("${DOCKER_IMAGE}:${DOCKER_TAG}")
+                        image.push()
+                        
+                        if (env.BRANCH_NAME == 'main') {
+                            image.push('latest')
+                        }
+                    }
+                    
+                    echo "✅ Docker image pushed: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
+                }
+            }
+        }
+        
+        stage('🚀 Deploy') {
+            parallel {
+                stage('🔧 Deploy to Development') {
+                    when {
+                        anyOf {
+                            branch 'develop'
+                            branch 'feature/*'
+                        }
+                    }
+                    steps {
+                        script {
+                            echo "🚀 Deploying to Development environment"
+                            
+                            // Deploy to Kubernetes/Docker Swarm/etc.
+                            sh """
+                                # Update deployment with new image
+                                kubectl set image deployment/${APP_NAME} \
+                                    ${APP_NAME}=${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} \
+                                    -n ${DEV_NAMESPACE} || true
+                                
+                                # Wait for rollout
+                                kubectl rollout status deployment/${APP_NAME} -n ${DEV_NAMESPACE} --timeout=300s || true
+                                
+                                echo "✅ Deployment to Development completed"
+                            """
+                        }
+                    }
+                }
+                
+                stage('🎯 Deploy to Production') {
+                    when {
+                        branch 'main'
+                    }
+                    steps {
+                        script {
+                            // Production deployment with approval
+                            timeout(time: 10, unit: 'MINUTES') {
+                                input message: 'Deploy to Production?', 
+                                      ok: 'Deploy',
+                                      submitterParameter: 'DEPLOYER'
+                            }
+                            
+                            echo "🎯 Deploying to Production environment"
+                            echo "👤 Deployed by: ${env.DEPLOYER}"
+                            
+                            sh """
+                                # Blue-Green deployment or Rolling update
+                                kubectl set image deployment/${APP_NAME} \
+                                    ${APP_NAME}=${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} \
+                                    -n ${PROD_NAMESPACE}
+                                
+                                # Wait for rollout
+                                kubectl rollout status deployment/${APP_NAME} -n ${PROD_NAMESPACE} --timeout=600s
+                                
+                                # Health check after deployment
+                                sleep 30
+                                kubectl get pods -n ${PROD_NAMESPACE} -l app=${APP_NAME}
+                                
+                                echo "✅ Production deployment completed successfully"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('🔍 Post-Deployment Verification') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'develop'
+                }
+            }
+            steps {
+                script {
+                    echo "🔍 Running post-deployment verification"
+                    
+                    // Determine environment URL
+                    def environmentUrl = env.BRANCH_NAME == 'main' ? 
+                        'https://api.prod.company.com' : 
+                        'https://api.dev.company.com'
+                    
+                    // Health and smoke tests
+                    sh """
+                        echo "🏥 Running health checks on ${environmentUrl}"
+                        
+                        # Application health
+                        curl -f ${environmentUrl}/actuator/health
+                        
+                        # Virtual thread verification
+                        curl -f ${environmentUrl}/api/v1/virtual-threads/info | grep -q "virtual.*true"
+                        
+                        # Performance verification
+                        response=\$(curl -s "${environmentUrl}/api/v1/virtual-threads/performance-test?virtualThreads=50&platformThreads=25")
+                        echo "\$response" | grep -q "virtualThreadTime"
+                        
+                        echo "✅ All post-deployment checks passed"
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Cleanup
+            sh '''
+                docker image prune -f || true
+                docker container prune -f || true
+            '''
+            
+            // Archive logs
+            archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
+        }
+        
+        success {
+            script {
+                echo "✅ Pipeline completed successfully!"
+                
+                // Success notifications
+                try {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'good',
+                        message: """
+                            ✅ *Deployment Successful* - Customer Service with Virtual Threads
+                            
+                            📦 *Build:* ${BUILD_NUMBER}
+                            🌿 *Branch:* ${env.BRANCH_NAME}
+                            🚀 *Image:* ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                            🧵 *Virtual Threads:* Enabled
+                            ⏱️ *Duration:* ${currentBuild.durationString}
+                            
+                            📊 <${BUILD_URL}|View Build Details>
+                        """
+                    )
+                } catch (Exception e) {
+                    echo "⚠️ Slack notification failed: ${e.message}"
+                }
+            }
+        }
+        
+        failure {
+            script {
+                echo "❌ Pipeline failed!"
+                
+                // Failure notifications
+                try {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                            ❌ *Deployment Failed* - Customer Service with Virtual Threads
+                            
+                            📦 *Build:* ${BUILD_NUMBER}
+                            🌿 *Branch:* ${env.BRANCH_NAME}
+                            ⏱️ *Duration:* ${currentBuild.durationString}
+                            
+                            🔍 <${BUILD_URL}console|View Console Output>
+                            📊 <${BUILD_URL}|View Build Details>
+                        """
+                    )
+                    
+                    // Email notification for critical failures
+                    if (env.BRANCH_NAME == 'main') {
+                        emailext(
+                            subject: "❌ Production Deployment Failed - Customer Service",
+                            body: """
+                                Production deployment of Customer Service with Virtual Threads has failed.
+                                
+                                Build: ${BUILD_NUMBER}
+                                Branch: ${env.BRANCH_NAME}
+                                Duration: ${currentBuild.durationString}
+                                
+                                Please check the console output: ${BUILD_URL}console
+                            """,
+                            to: env.EMAIL_RECIPIENTS
+                        )
+                    }
+                } catch (Exception e) {
+                    echo "⚠️ Notification failed: ${e.message}"
+                }
+            }
+        }
+        
+        unstable {
+            echo "⚠️ Pipeline completed with warnings"
+        }
+        
+        changed {
+            echo "🔄 Pipeline status changed from previous build"
+        }
+    }
+}

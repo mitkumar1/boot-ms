@@ -1,0 +1,147 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer-service-ingress
+  namespace: default
+  labels:
+    app: customer-service
+  annotations:
+    # NGINX Ingress Controller
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    
+    # Circuit breaker and rate limiting at ingress level
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    
+    # Health checks
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "60"
+    nginx.ingress.kubernetes.io/upstream-keepalive-requests: "10000"
+    
+    # Load balancing
+    nginx.ingress.kubernetes.io/load-balance: "round_robin"
+    
+    # For AWS ALB (Alternative to NGINX)
+    # kubernetes.io/ingress.class: alb
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+    # alb.ingress.kubernetes.io/health-check-path: /actuator/health
+    # alb.ingress.kubernetes.io/health-check-interval-seconds: '30'
+    # alb.ingress.kubernetes.io/health-check-timeout-seconds: '5'
+    # alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    # alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    
+    # For Azure Application Gateway (Alternative)
+    # kubernetes.io/ingress.class: azure/application-gateway
+    # appgw.ingress.kubernetes.io/health-probe-path: "/actuator/health"
+    # appgw.ingress.kubernetes.io/health-probe-interval: "30"
+    # appgw.ingress.kubernetes.io/health-probe-timeout: "5"
+    # appgw.ingress.kubernetes.io/health-probe-unhealthy-threshold: "3"
+    
+spec:
+  ingressClassName: nginx  # Use 'alb' for AWS or 'azure-application-gateway' for Azure
+  tls:
+  - hosts:
+    - customer-service.example.com
+    - api.example.com
+    secretName: customer-service-tls
+  rules:
+  - host: customer-service.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: customer-service
+            port:
+              number: 80
+      - path: /actuator
+        pathType: Prefix
+        backend:
+          service:
+            name: customer-service
+            port:
+              number: 9090
+  - host: api.example.com
+    http:
+      paths:
+      - path: /customer-service
+        pathType: Prefix
+        backend:
+          service:
+            name: customer-service
+            port:
+              number: 80
+
+---
+# TLS Certificate (self-signed example - use cert-manager in production)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: customer-service-tls
+  namespace: default
+type: kubernetes.io/tls
+data:
+  # Replace with actual certificate data
+  tls.crt: LS0tLS1CRUdJTi... # Base64 encoded certificate
+  tls.key: LS0tLS1CRUdJTi... # Base64 encoded private key
+
+---
+# Network Policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: customer-service-netpol
+  namespace: default
+  labels:
+    app: customer-service
+spec:
+  podSelector:
+    matchLabels:
+      app: customer-service
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9090
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow HTTPS to external services
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow communication with other services in cluster
+  - to:
+    - podSelector:
+        matchLabels:
+          app: config-server
+    - podSelector:
+        matchLabels:
+          app: database
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 3306  # MySQL
